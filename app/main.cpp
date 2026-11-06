@@ -11,6 +11,7 @@
 namespace
 {
 
+// 参数不对时打印用法。
 void PrintUsage()
 {
     std::printf("用法: marketflow <ticks.bin> [--csv bars.csv]\n");
@@ -18,9 +19,10 @@ void PrintUsage()
     std::printf("  --csv      把聚合出的 K 线写成 CSV，便于外部核对\n");
 }
 
+// 把算好的 K 线写成 CSV，方便用 Excel 或别的脚本核对。
 bool WriteCsv(const std::string& path, const std::vector<marketflow::Bar>& bars)
 {
-    std::FILE* file = std::fopen(path.c_str(), "wb");
+    std::FILE* file = std::fopen(path.c_str(), "wb");                   // "wb" = 二进制只写
     if (file == nullptr)
     {
         return false;
@@ -44,8 +46,9 @@ bool WriteCsv(const std::string& path, const std::vector<marketflow::Bar>& bars)
     return true;
 }
 
-}  // namespace
+} // namespace
 
+// 回放一个 ticks.bin：边读边把成交记录攒成分钟 K 线，最后把统计打到屏幕。
 int main(int argc, char** argv)
 {
     if (argc < 2)
@@ -79,6 +82,8 @@ int main(int argc, char** argv)
 
         const marketflow::Tick* ticks = nullptr;
         std::size_t count = 0;
+
+        // 一批一批读：每批（8MB）喂完，才检查一次有没有哪一分钟该交出去了。
         while (reader.NextBatch(ticks, count))
         {
             for (std::size_t i = 0; i < count; ++i)
@@ -86,18 +91,18 @@ int main(int argc, char** argv)
                 aggregator.OnTick(ticks[i]);
             }
 
-            // 每块结束后推一次水位线，把已经确定不会再变的窗口关掉，避免内存一直涨。
             aggregator.Drain(sink);
 
-            const std::size_t open_windows = aggregator.OpenWindowCount();
-            if (open_windows > peak_open_windows)
+            // 记下同时开着多少分钟，用来看内存有没有失控。
+            if (aggregator.OpenWindowCount() > peak_open_windows)
             {
-                peak_open_windows = open_windows;
+                peak_open_windows = aggregator.OpenWindowCount();
             }
         }
 
-        aggregator.Flush(sink);
+        aggregator.Flush(sink);                                         // 文件读完，剩下开着的分钟全部算完
 
+        // duration<double> 把时间差转成秒（浮点），后面好算吞吐。
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         const std::uint64_t total = reader.TotalRead();
 

@@ -14,6 +14,7 @@ namespace
 
 bool g_passed = true;
 
+// 打印一条断言结果；任何一条失败，进程最后返回 1。
 void Check(bool condition, const char* what)
 {
     std::printf("  %s  %s\n", condition ? "ok  " : "FAIL", what);
@@ -23,10 +24,10 @@ void Check(bool condition, const char* what)
     }
 }
 
-// 基准时间必须先对齐到整分钟，否则窗口切分会整体偏几十秒，测试就失去意义。
+// 基准时间必须先对齐到整分钟，否则分钟会整体偏几十秒，测试就失去意义。
 constexpr std::uint64_t kBaseTs = (1'760'000'000ULL / 60ULL) * 60ULL * 1'000'000'000ULL;
 
-// 暴力版本：不用水位线、不关窗口，把所有 tick 直接塞进 std::map。
+// 暴力版本：不设界线、不关分钟，把每条成交记录直接塞进 std::map。
 // 它和 BarAggregator 是两套独立写法，用来做对照。
 std::map<std::uint64_t, Bar> BuildReference(const std::vector<Tick>& ticks)
 {
@@ -40,6 +41,7 @@ std::map<std::uint64_t, Bar> BuildReference(const std::vector<Tick>& ticks)
         auto it = bars.find(key);
         if (it == bars.end())
         {
+            // 这一分钟第一次出现：四个价格都先等于第一笔成交价。
             Bar bar{};
             bar.symbol_id = tick.symbol_id;
             bar.window_start_ns = window_start;
@@ -53,6 +55,7 @@ std::map<std::uint64_t, Bar> BuildReference(const std::vector<Tick>& ticks)
             continue;
         }
 
+        // 不是第一次：跟当前最高最低比一遍，收盘价换成这一笔，成交量累加。
         Bar& bar = it->second;
         if (tick.price > bar.high)
         {
@@ -70,13 +73,14 @@ std::map<std::uint64_t, Bar> BuildReference(const std::vector<Tick>& ticks)
     return bars;
 }
 
+// 造一批成交记录：每个标的各自随机游走，时间戳按整分钟均匀铺开。
 std::vector<Tick> MakeTicks(std::uint32_t symbol_count, std::uint32_t minutes, std::uint32_t per_minute, unsigned seed)
 {
     std::vector<Tick> ticks;
     ticks.reserve(static_cast<std::size_t>(symbol_count) * minutes * per_minute);
 
-    std::mt19937 rng(seed);
-    std::uniform_int_distribution<int> price_step(-3, 3);
+    std::mt19937 rng(seed);                                                 // 伪随机数发生器，同一个种子结果可复现
+    std::uniform_int_distribution<int> price_step(-3, 3);                   // 闭区间 [-3, 3] 均匀取整
     std::uniform_int_distribution<std::uint32_t> volume_dist(1, 500);
 
     for (std::uint32_t symbol = 0; symbol < symbol_count; ++symbol)
@@ -87,7 +91,7 @@ std::vector<Tick> MakeTicks(std::uint32_t symbol_count, std::uint32_t minutes, s
         {
             for (std::uint32_t i = 0; i < per_minute; ++i)
             {
-                price += price_step(rng);
+                price += price_step(rng);                                   // 价格做小步随机游走
                 if (price < 1)
                 {
                     price = 1;
@@ -96,7 +100,7 @@ std::vector<Tick> MakeTicks(std::uint32_t symbol_count, std::uint32_t minutes, s
                 Tick tick{};
                 tick.symbol_id = symbol;
                 tick.ts_ns = kBaseTs + static_cast<std::uint64_t>(minute) * kWindowNs +
-                             static_cast<std::uint64_t>(i) * (kWindowNs / per_minute);
+                             static_cast<std::uint64_t>(i) * (kWindowNs / per_minute);   // 把一分钟切成 per_minute 份
                 tick.price = price;
                 tick.volume = volume_dist(rng);
                 tick.side = static_cast<std::uint8_t>(1 + (i & 1));
@@ -108,6 +112,7 @@ std::vector<Tick> MakeTicks(std::uint32_t symbol_count, std::uint32_t minutes, s
     return ticks;
 }
 
+// 用例 1：同样的数据，流式聚合和暴力重算逐根 K 线比对。
 void TestStreamingMatchesReference()
 {
     std::printf("[case 1] 流式聚合与暴力重算逐条一致\n");
@@ -158,9 +163,10 @@ void TestStreamingMatchesReference()
     Check(aggregator.LateDroppedTicks() == 0, "顺序数据不产生丢弃");
 }
 
+// 用例 2：某一分钟已经关掉之后，再来的成交记录必须被拒绝并计数。
 void TestLateTickIsDropped()
 {
-    std::printf("[case 2] 窗口关闭后的迟到 tick 被丢弃\n");
+    std::printf("[case 2] 分钟关闭后的迟到记录被丢弃\n");
 
     BarAggregator aggregator;
     std::uint32_t bar_count = 0;
@@ -178,35 +184,36 @@ void TestLateTickIsDropped()
 
     Tick far_tick{};
     far_tick.symbol_id = 1;
-    far_tick.ts_ns = kBaseTs + 3 * kWindowNs;
+    far_tick.ts_ns = kBaseTs + 3 * kWindowNs;                               // 直接跳到第 3 分钟，把界线推过第 0 分钟
     far_tick.price = 200;
     far_tick.volume = 10;
     aggregator.OnTick(far_tick);
 
     aggregator.Drain(sink);
-    Check(bar_count == 1, "水位线越过第 0 分钟后该窗口被关闭输出");
+    Check(bar_count == 1, "界线越过第 0 分钟后，那一分钟被关闭并输出");
 
     Tick late_tick{};
     late_tick.symbol_id = 1;
-    late_tick.ts_ns = kBaseTs + 30'000'000'000ULL;   // 落在第 0 分钟，但窗口已经关了
+    late_tick.ts_ns = kBaseTs + 30'000'000'000ULL;                          // 落在第 0 分钟，但那一分钟已经关掉了
     late_tick.price = 999;
     late_tick.volume = 10;
 
     const bool accepted = aggregator.OnTick(late_tick);
-    Check(!accepted, "窗口关闭后的迟到 tick 被拒绝");
+    Check(!accepted, "分钟关闭后的迟到记录被拒绝");
     Check(aggregator.LateDroppedTicks() == 1, "迟到计数为 1");
 }
 
+// 用例 3：贴着整分钟边界的两笔成交，必须落在两根不同的 K 线里。
 void TestWindowBoundary()
 {
-    std::printf("[case 3] 窗口边界按整分钟切分\n");
+    std::printf("[case 3] 分钟边界按整分钟切分\n");
 
     BarAggregator aggregator;
     std::vector<Bar> bars;
 
-    Tick a{}; a.symbol_id = 7; a.ts_ns = kBaseTs + kWindowNs - 1; a.price = 10; a.volume = 1;
-    Tick b{}; b.symbol_id = 7; b.ts_ns = kBaseTs + kWindowNs;     b.price = 20; b.volume = 1;
-    Tick c{}; c.symbol_id = 7; c.ts_ns = kBaseTs + 5;             c.price = 30; c.volume = 1;
+    Tick a{}; a.symbol_id = 7; a.ts_ns = kBaseTs + kWindowNs - 1; a.price = 10; a.volume = 1;   // 第 0 分钟最后一纳秒
+    Tick b{}; b.symbol_id = 7; b.ts_ns = kBaseTs + kWindowNs;     b.price = 20; b.volume = 1;   // 第 1 分钟第一纳秒
+    Tick c{}; c.symbol_id = 7; c.ts_ns = kBaseTs + 5;             c.price = 30; c.volume = 1;   // 第 0 分钟最早的一笔，最后才到
 
     aggregator.OnTick(a);
     aggregator.OnTick(b);
@@ -217,16 +224,17 @@ void TestWindowBoundary()
     Check(bars.size() == 2, "跨越整分钟的成交落在两根 K 线里");
     if (bars.size() == 2)
     {
-        Check(bars[0].window_start_ns == kBaseTs, "第一根 K 线起点是整分钟");
+        Check(bars[0].window_start_ns == kBaseTs, "第 1 根 K 线起点是整分钟");
         Check(bars[0].open == 10 && bars[0].high == 30 && bars[0].low == 10 && bars[0].close == 30,
-              "第一根 K 线的四个价格正确（open 取窗口内第一笔到达价）");
-        Check(bars[0].volume == 2 && bars[0].amount == 40, "第一根 K 线的成交量与成交额正确");
-        Check(bars[1].open == 20 && bars[1].close == 20, "第二根 K 线只有一笔成交");
+              "第 1 根 K 线的四个价格正确（open 取那一分钟里第一笔到达的价）");
+        Check(bars[0].volume == 2 && bars[0].amount == 40, "第 1 根 K 线的成交量与成交额正确");
+        Check(bars[1].open == 20 && bars[1].close == 20, "第 2 根 K 线只有一笔成交");
     }
 }
 
-}  // namespace
+} // namespace
 
+// 依次跑三个用例，有任何断言失败就返回 1。
 int main()
 {
     TestStreamingMatchesReference();
