@@ -22,12 +22,13 @@ C++20 低延迟行情接入与窗口聚合服务。
 
 ```text
 MarketFlow/
-├── include/marketflow/     公共头文件
-├── src/                    实现
+├── marketflow/             库：行情模型、二进制读取、窗口聚合（头文件与实现同目录）
 │   ├── model/              Tick / Bar 数据结构
 │   ├── io/                 二进制文件读取
 │   └── aggregate/          窗口聚合
+├── app/                    主程序
 ├── tests/                  正确性测试（暴力重算对照）
+├── tools/                  数据生成脚本
 ├── data/                   数据目录（大文件不入库）
 ├── docs/                   设计与实验记录
 └── perf-results/           每次运行的原始数据（不入库）

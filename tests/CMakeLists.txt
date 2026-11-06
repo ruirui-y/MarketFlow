@@ -1,0 +1,5 @@
+# 流式聚合结果必须与暴力重算逐条一致；迟到丢弃和整分钟边界分别单独覆盖。
+add_executable(marketflow_aggregate_test bar_aggregator_test.cpp)
+target_link_libraries(marketflow_aggregate_test PRIVATE marketflow_core)
+add_test(NAME marketflow_aggregate_test COMMAND marketflow_aggregate_test)
+set_tests_properties(marketflow_aggregate_test PROPERTIES RUN_SERIAL TRUE)
