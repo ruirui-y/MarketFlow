@@ -1,0 +1,39 @@
+# CMake 构建目录和编译产物
+/build/
+/out/
+.cache/
+compile_commands.json
+
+# IDE 和本机工具生成的文件
+/.vs/
+/.idea/
+/.vscode/
+/.workbuddy/
+
+# 编译生成的文件
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.lib
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.log
+
+# 本地打包文件不提交到 Git
+*.zip
+*.tar
+*.tar.gz
+*.bkp
+
+# 行情数据与原始结果：体积大，不入库
+/data/*.bin
+/data/*.csv
+!/data/README.md
+
+# 每次运行的原始数据按需提交，默认先忽略
+/perf-results/*/
+!/perf-results/README.md

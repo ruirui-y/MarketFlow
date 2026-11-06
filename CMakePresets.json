@@ -1,0 +1,56 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 22,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "linux-base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "linux-debug",
+            "displayName": "MarketFlow Linux Debug",
+            "description": "Linux + Ninja + C++20 Debug",
+            "inherits": "linux-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "linux-release",
+            "displayName": "MarketFlow Linux Release",
+            "description": "Linux + Ninja + C++20 Release",
+            "inherits": "linux-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "build-linux-debug",
+            "configurePreset": "linux-debug"
+        },
+        {
+            "name": "build-linux-release",
+            "configurePreset": "linux-release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "test-linux-debug",
+            "configurePreset": "linux-debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}
